@@ -22,6 +22,7 @@ pub use singular::SingularField;
 pub use singular::SingularPtrField;
 pub use clear::Clear;
 pub use core::Message;
+pub use core::OrderedFieldsMessage;
 pub use core::parse_from_bytes;
 pub use core::parse_from_reader;
 #[cfg(feature = "bytes")]

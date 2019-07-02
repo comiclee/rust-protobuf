@@ -139,6 +139,7 @@ impl<'a> EnumGen<'a> {
             derive.push("PartialEq");
         }
         derive.push("Eq");
+        derive.push("PartialOrd");
         derive.push("Debug");
         if !self.allow_alias() {
             derive.push("Hash");

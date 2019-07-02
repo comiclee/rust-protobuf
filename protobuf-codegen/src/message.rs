@@ -129,10 +129,20 @@ impl<'a> MessageGen<'a> {
     }
 
     fn write_write_to_with_cached_sizes(&self, w: &mut CodeWriter) {
+        let is_request = if let Some(v) = self.type_name.rfind("Request") {
+            if v == self.type_name.len() - 7 {
+//                println!("is request: {} index={} comp={}", self.type_name, v, self.type_name.len()-7);
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
         w.def_fn("write_to_with_cached_sizes(&self, os: &mut ::protobuf::CodedOutputStream) -> ::protobuf::ProtobufResult<()>", |w| {
             // To have access to its methods but not polute the name space.
             for f in self.fields_except_oneof_and_group() {
-                f.write_message_write_field(w);
+                f.write_message_write_field(w, is_request);
             }
             self.write_match_each_oneof_variant(w, |w, variant, v, v_type| {
                 variant.field.write_write_element(w, "os", v, v_type);
