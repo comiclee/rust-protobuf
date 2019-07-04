@@ -182,6 +182,26 @@ pub trait Message: fmt::Debug + Clear + Any + Send + Sync {
         where Self : Sized;
 }
 
+pub trait MessageExt: Message {
+    fn write_to_with_ordered_fields(&self, os: &mut CodedOutputStream) -> ProtobufResult<()>;
+    fn write_to_bytes_with_ordered_fields(&self) -> ProtobufResult<Vec<u8>> {
+        self.check_initialized()?;
+
+        let size = self.compute_size() as usize;
+        let mut v = Vec::with_capacity(size);
+        // skip zerofill
+        unsafe {
+            v.set_len(size);
+        }
+        {
+            let mut os = CodedOutputStream::bytes(&mut v);
+            self.write_to_with_ordered_fields(&mut os)?;
+            os.check_eof();
+        }
+        Ok(v)
+    }
+}
+
 pub fn message_down_cast<'a, M : Message + 'a>(m: &'a Message) -> &'a M {
     m.as_any().downcast_ref::<M>().unwrap()
 }

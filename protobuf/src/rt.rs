@@ -3,7 +3,8 @@
 
 use std::default::Default;
 use std::hash::Hash;
-use std::collections::HashMap;
+use std::cmp::Ord;
+use std::collections::{HashMap, BTreeMap};
 
 #[cfg(feature = "bytes")]
 use bytes::Bytes;
@@ -877,6 +878,35 @@ where
 {
     for (k, v) in map {
 
+        let key_tag_size = 1;
+        let value_tag_size = 1;
+
+        let key_len = K::get_cached_size_with_length_delimiter(k);
+        let value_len = V::get_cached_size_with_length_delimiter(v);
+
+        let entry_len = key_tag_size + key_len + value_tag_size + value_len;
+
+        os.write_tag(field_number, WireType::WireTypeLengthDelimited)?;
+        os.write_raw_varint32(entry_len)?;
+        K::write_with_cached_size(1, k, os)?;
+        V::write_with_cached_size(2, v, os)?;
+    }
+    Ok(())
+}
+
+/// Write map, message sizes must be already known.
+pub fn write_ordered_map_with_cached_sizes<K, V>(
+    field_number: u32,
+    map: &HashMap<K::Value, V::Value>,
+    os: &mut CodedOutputStream,
+) -> ProtobufResult<()>
+    where
+        K : ProtobufType,
+        V : ProtobufType,
+        K::Value : Eq + Hash + Ord,
+{
+    let btmap: BTreeMap<&K::Value, &V::Value> = map.iter().collect();
+    for (k, v) in btmap {
         let key_tag_size = 1;
         let value_tag_size = 1;
 
