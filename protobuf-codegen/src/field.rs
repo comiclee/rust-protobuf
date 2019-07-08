@@ -1141,6 +1141,47 @@ impl<'a> FieldGen<'a> {
         }
     }
 
+    // repeated or singular
+    pub fn write_for_self_field_ordered<F>(&self, w: &mut CodeWriter, varn: &str, cb: F)
+        where
+            F : Fn(&mut CodeWriter, &RustType),
+    {
+        match self.kind {
+            FieldKind::Oneof(OneofField {
+                                 ref elem,
+                                 ref oneof_type_name,
+                                 ..
+                             }) => {
+                let cond = format!(
+                    "Some({}::{}(ref {}))",
+                    oneof_type_name,
+                    self.rust_name,
+                    varn
+                );
+                w.if_let_stmt(
+                    &cond,
+                    &self.self_field_oneof(),
+                    |w| cb(w, &elem.rust_storage_type()),
+                )
+            }
+            _ => {
+                let v_type = self.full_storage_iter_elem_type();
+                let self_field = self.self_field();
+                let field_name = &self.rust_name;
+                w.write_line(&format!("let mut {} = {}.clone();", field_name, &self_field));
+                match self.proto_type {
+                    FieldDescriptorProto_Type::TYPE_STRING => {
+                        w.write_line(&format!("{}.sort_by(|a, b| a.as_bytes().partial_cmp(b.as_bytes()).unwrap());", field_name));
+                    },
+                    _ => {
+                        w.write_line(&format!("{}.sort_by(|a, b| a.partial_cmp(b).unwrap());", field_name));
+                    }
+                }
+                w.for_stmt(&format!("&{}", field_name), varn, |w| cb(w, &v_type));
+            }
+        }
+    }
+
     fn write_self_field_assign(&self, w: &mut CodeWriter, value: &str) {
         let self_field = self.self_field();
         w.write_line(&format!("{} = {};", self_field, value));
@@ -1506,6 +1547,76 @@ impl<'a> FieldGen<'a> {
             FieldKind::Map(MapField { ref key, ref value, .. }) => {
                 w.write_line(&format!(
                     "::protobuf::rt::write_map_with_cached_sizes::<{}, {}>({}, &{}, os)?;",
+                    key.lib_protobuf_type(),
+                    value.lib_protobuf_type(),
+                    self.proto_field.number(),
+                    self.self_field()
+                ));
+            }
+            FieldKind::Oneof(..) => unreachable!(),
+        };
+    }
+
+    pub fn write_message_write_field_with_ordered_fields(&self, w: &mut CodeWriter) {
+        match self.kind {
+            FieldKind::Singular(..) => {
+                self.write_if_let_self_field_is_some(w, |v, v_type, w| {
+                    self.write_write_element(w, "os", v, v_type);
+                });
+            }
+            FieldKind::Repeated(RepeatedField { packed: false, .. }) => {
+                let can_order = match self.proto_type {
+                    FieldDescriptorProto_Type::TYPE_INT32 |
+                    FieldDescriptorProto_Type::TYPE_INT64 |
+                    FieldDescriptorProto_Type::TYPE_UINT32 |
+                    FieldDescriptorProto_Type::TYPE_UINT64 |
+                    FieldDescriptorProto_Type::TYPE_SINT32 |
+                    FieldDescriptorProto_Type::TYPE_SINT64 |
+                    FieldDescriptorProto_Type::TYPE_FIXED32 |
+                    FieldDescriptorProto_Type::TYPE_FIXED64 |
+                    FieldDescriptorProto_Type::TYPE_SFIXED32 |
+                    FieldDescriptorProto_Type::TYPE_SFIXED64 |
+                    FieldDescriptorProto_Type::TYPE_FLOAT |
+                    FieldDescriptorProto_Type::TYPE_DOUBLE |
+                    FieldDescriptorProto_Type::TYPE_BYTES |
+                    FieldDescriptorProto_Type::TYPE_STRING => true,
+                    _ => false,
+                };
+                if can_order {
+                    self.write_for_self_field_ordered(w, "v", |w, v_type| {
+                        self.write_write_element(w, "os", "v", v_type);
+                    });
+                } else {
+                    self.write_for_self_field(w, "v", |w, v_type| {
+                        self.write_write_element(w, "os", "v", v_type);
+                    });
+                }
+            }
+            FieldKind::Repeated(RepeatedField { packed: true, .. }) => {
+                self.write_if_self_field_is_not_empty(w, |w| {
+                    let number = self.proto_field.number();
+                    w.write_line(&format!(
+                        "os.write_tag({}, ::protobuf::wire_format::{:?})?;",
+                        number,
+                        wire_format::WireTypeLengthDelimited
+                    ));
+                    w.comment("TODO: Data size is computed again, it should be cached");
+                    let data_size_expr = self.self_field_vec_packed_data_size();
+                    w.write_line(&format!("os.write_raw_varint32({})?;", data_size_expr));
+                    self.write_for_self_field(w, "v", |w, v_type| {
+                        let param_type = self.os_write_fn_param_type();
+                        let os_write_fn_suffix = self.os_write_fn_suffix();
+                        w.write_line(&format!(
+                            "os.write_{}_no_tag({})?;",
+                            os_write_fn_suffix,
+                            v_type.into_target(&param_type, "v")
+                        ));
+                    });
+                });
+            }
+            FieldKind::Map(MapField { ref key, ref value, .. }) => {
+                w.write_line(&format!(
+                    "::protobuf::rt::write_ordered_map_with_cached_sizes::<{}, {}>({}, &{}, os)?;",
                     key.lib_protobuf_type(),
                     value.lib_protobuf_type(),
                     self.proto_field.number(),
